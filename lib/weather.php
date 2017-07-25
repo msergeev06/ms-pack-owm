@@ -6,26 +6,34 @@ use MSergeev\Core\Entity\Query;
 use MSergeev\Core\Exception;
 use MSergeev\Core\Lib\DateHelper;
 use MSergeev\Core\Lib\Options;
-use MSergeev\Packages\Owm\Tables\CityTable;
-use MSergeev\Packages\Owm\Tables\ForecastTable;
-use MSergeev\Packages\Owm\Tables\SunTable;
-use MSergeev\Packages\Owm\Tables\TimezoneTable;
+use MSergeev\Core\Lib\Events;
+use MSergeev\Core\Lib\SqlHelper;
+use MSergeev\Packages\Owm\Tables;
 
 class Weather
 {
 	const CONST_HPA_MM = 0.750062;
 
-	public static function getWeather ($cityID=0)
+	public static function getWeather ($cityID=0, $appID=false)
 	{
-		if ($cityID<=0)
+		if (!$appID || strlen($appID)<=0)
+		{
+			$appID = Options::getOptionStr('OWM_APP_ID');
+			if (!$appID)
+			{
+				return false;
+			}
+		}
+
+		if (intval($cityID)<=0)
 		{
 			//Получаем список городов и для каждого загружаем погоду
-			$arCity = CityTable::getList(array());
+			$arCity = Tables\CityTable::getList(array());
 		}
 		else
 		{
 			//Загружаем погоду только для заданного города
-			$arCity = CityTable::getList(array(
+			$arCity = Tables\CityTable::getList(array(
 				'filter' => array('ID'=>$cityID)
 			));
 		}
@@ -33,7 +41,7 @@ class Weather
 
 		foreach ($arCity as $city)
 		{
-			if ($arWeather = self::getWeatherArray($city['ID']))
+			if ($arWeather = self::getWeatherArray($city['ID'],$appID))
 			{
 				//Заполняем значения в таблицу рассветов и закатов
 				self::parseSunRiseSet($city,$arWeather);
@@ -47,6 +55,154 @@ class Weather
 		}
 	}
 
+	public static function getMinTempDate ($cityID=0, $date=null)
+	{
+		if (intval($cityID)<=0)
+		{
+			//Получаем список городов и для каждого загружаем погоду
+			$arCity = Tables\CityTable::getList(array());
+		}
+		else
+		{
+			//Загружаем погоду только для заданного города
+			$arCity = Tables\CityTable::getList(
+				array(
+					'filter' => array('ID'=>$cityID)
+				)
+			);
+		}
+
+		if (is_null($date))
+		{
+			$date = date("d.m.Y");
+		}
+
+		$arReturn = array();
+		$sqlHelper = new SqlHelper(Tables\ForecastTable::getTableName());
+		$dateHelper = new DateHelper();
+		foreach ($arCity as $city)
+		{
+			$query = new Query('select');
+			$sql = "SELECT\n\t"
+				.$sqlHelper->wrapFieldQuotes('CITY_ID').",\n\t"
+				.$sqlHelper->getMinFunction('TEMPERATURE_MIN','TEMPERATURE_MIN')."\n"
+				."FROM\n\t"
+				.$sqlHelper->wrapTableQuotes()."\n"
+				."WHERE\n\t"
+				.$sqlHelper->wrapFieldQuotes('CITY_ID').' = '.$city['ID']." AND\n\t"
+				.$sqlHelper->wrapFieldQuotes('DATETIME_FROM')." >= '".$dateHelper->convertDateToDB($date)." 00:00:00' AND\n\t"
+				.$sqlHelper->wrapFieldQuotes('DATETIME_FROM')." <= '".$dateHelper->convertDateToDB($date)." 18:00:00'\n";
+			$query->setQueryBuildParts($sql);
+			$res = $query->exec();
+			if ($ar_res = $res->fetch())
+			{
+				$arReturn[$ar_res['CITY_ID']] = round($ar_res['TEMPERATURE_MIN'],2);
+			}
+		}
+		if (!empty($arReturn))
+		{
+			return $arReturn;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	public static function getMaxTempDate ($cityID=0, $date=null)
+	{
+		if (intval($cityID)<=0)
+		{
+			//Получаем список городов и для каждого загружаем погоду
+			$arCity = Tables\CityTable::getList(array());
+		}
+		else
+		{
+			//Загружаем погоду только для заданного города
+			$arCity = Tables\CityTable::getList(
+				array(
+					'filter' => array('ID'=>$cityID)
+				)
+			);
+		}
+
+		if (is_null($date))
+		{
+			$date = date("d.m.Y");
+		}
+
+		$arReturn = array();
+		$sqlHelper = new SqlHelper(Tables\ForecastTable::getTableName());
+		$dateHelper = new DateHelper();
+		foreach ($arCity as $city)
+		{
+			$query = new Query('select');
+			$sql = "SELECT\n\t"
+				.$sqlHelper->wrapFieldQuotes('CITY_ID').",\n\t"
+				.$sqlHelper->getMaxFunction('TEMPERATURE_MAX','TEMPERATURE_MAX')."\n"
+				."FROM\n\t"
+				.$sqlHelper->wrapTableQuotes()."\n"
+				."WHERE\n\t"
+				.$sqlHelper->wrapFieldQuotes('CITY_ID').' = '.$city['ID']." AND\n\t"
+				.$sqlHelper->wrapFieldQuotes('DATETIME_FROM')." >= '".$dateHelper->convertDateToDB($date)." 00:00:00' AND\n\t"
+				.$sqlHelper->wrapFieldQuotes('DATETIME_FROM')." <= '".$dateHelper->convertDateToDB($date)." 18:00:00'\n";
+			$query->setQueryBuildParts($sql);
+			$res = $query->exec();
+			if ($ar_res = $res->fetch())
+			{
+				$arReturn[$ar_res['CITY_ID']] = round($ar_res['TEMPERATURE_MAX'],2);
+			}
+		}
+		if (!empty($arReturn))
+		{
+			return $arReturn;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	public static function getAvgTempDate ($cityID=0, $date=null)
+	{
+		if (intval($cityID)<=0)
+		{
+			//Получаем список городов и для каждого загружаем погоду
+			$arCity = Tables\CityTable::getList(array());
+		}
+		else
+		{
+			//Загружаем погоду только для заданного города
+			$arCity = Tables\CityTable::getList(array(
+				'filter' => array('ID'=>$cityID)
+			));
+		}
+
+		if (is_null($date))
+		{
+			$date = date("d.m.Y");
+		}
+
+		$arReturn = array();
+		foreach ($arCity as $city)
+		{
+			$minTemp = self::getMinTempDate($city['ID'],$date)[$city['ID']];
+			$maxTemp = self::getMaxTempDate($city['ID'],$date)[$city['ID']];
+			if ($minTemp && $maxTemp)
+			{
+				$arReturn[$city['ID']] = round((($minTemp+$maxTemp)/2),2);
+			}
+		}
+		if (!empty($arReturn))
+		{
+			return $arReturn;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
 	protected static function forecastMergeToTimezone ($city)
 	{
 		$dateHelper = new DateHelper();
@@ -54,10 +210,10 @@ class Weather
 		$tomorrowDate = $dateHelper->strToTime($todayDate);
 
 		//Заполняем сегодняшние данные
-		self::forecastMergeToTimezoneToDate($city,$todayDate);
+		self::forecastMergeToTimezoneToDate($city,$todayDate);//$dateHelper->convertDateToDB($todayDate));
 
 		//Заполняем завтрашние данные
-		self::forecastMergeToTimezoneToDate($city,$tomorrowDate);
+		self::forecastMergeToTimezoneToDate($city,$tomorrowDate);//$dateHelper->convertDateToDB($tomorrowDate));
 
 	}
 
@@ -65,13 +221,16 @@ class Weather
 	{
 		$dateHelper = new DateHelper();
 
-		$forecastRes = ForecastTable::getList(array(
+		$forecastRes = Tables\ForecastTable::getList(array(
 			'filter' => array(
 				'CITY_ID' => $city['ID'],
 				'>=DATETIME_FROM' => $toDate.' 00:00:00',
 				'<=DATETIME_FROM' => $toDate.' 23:59:59'
-			)
+			),
+			'order' => array('DATETIME_FROM'=>'ASC')
 		));
+		//msEchoVar($forecastRes['SQL']);
+		//msDebug($forecastRes);
 
 		$arTemp = $forecastRes;
 		$forecastRes = array();
@@ -195,14 +354,19 @@ class Weather
 					$arUpdateInsert['DATETIME_TO'] = $toDate.' '.$i6.':00:00';
 				}
 
-				$checkIsset = TimezoneTable::getList(array(
+				$checkIsset = Tables\TimezoneTable::getList(array(
 					'select' => array('ID'),
 					'filter' => array(
 						'CITY_ID' => $city['ID'],
 						'DATETIME_FROM' => $arUpdateInsert['DATETIME_FROM'],
 						'DATETIME_TO' => $arUpdateInsert['DATETIME_TO']
-					)
+					),
+					'limit' => 1
 				));
+				if ($checkIsset && isset($checkIsset[0]))
+				{
+					$checkIsset = $checkIsset[0];
+				}
 				if ($checkIsset)
 				{
 					//Update
@@ -211,9 +375,9 @@ class Weather
 					$query = new Query('update');
 					$query->setUpdateParams(
 						$arUpdateInsert,
-						$checkIsset[0]['ID'],
-						TimezoneTable::getTableName(),
-						TimezoneTable::getMapArray()
+						$checkIsset['ID'],
+						Tables\TimezoneTable::getTableName(),
+						Tables\TimezoneTable::getMapArray()
 					);
 					$query->exec();
 				}
@@ -223,30 +387,28 @@ class Weather
 					$query = new Query('insert');
 					$query->setInsertParams(
 						$arUpdateInsert,
-						TimezoneTable::getTableName(),
-						TimezoneTable::getMapArray()
+						Tables\TimezoneTable::getTableName(),
+						Tables\TimezoneTable::getMapArray()
 					);
 					$query->exec();
 				}
-
 			}
-
-
 		}
+		//msDebug($forecastRes);
 	}
 
-	protected static function parseForecast ($city, $arWeather)
+	protected static function parseForecast ($arCity, $arWeather)
 	{
 		$dateHelper = new DateHelper();
 
 		foreach ($arWeather['forecast']['time'] as $arForecast)
 		{
-			$arInsertUpdate = array('CITY_ID'=>$city['ID']);
+			$arInsertUpdate = array('CITY_ID'=>$arCity['ID']);
 
 			list($date, $time) = explode('T',$arForecast['@attributes']['from']);
 			$date = $dateHelper->convertDateFromDB($date);
 			$arTime = explode(':',$time);
-			$arTime[0] += $city['UTC_HOUR'];
+			$arTime[0] += $arCity['UTC_HOUR'];
 			if ($arTime[0]>23)
 			{
 				$arTime[0] -= 24;
@@ -257,7 +419,7 @@ class Weather
 			list($date, $time) = explode('T',$arForecast['@attributes']['to']);
 			$date = $dateHelper->convertDateFromDB($date);
 			$arTime = explode(':',$time);
-			$arTime[0] += $city['UTC_HOUR'];
+			$arTime[0] += $arCity['UTC_HOUR'];
 			if ($arTime[0]>23)
 			{
 				$arTime[0] -= 24;
@@ -267,7 +429,7 @@ class Weather
 			if (isset($arForecast['symbol']))
 			{
 				$arInsertUpdate['SYMBOL_NUMBER'] = $arForecast['symbol']['@attributes']['number'];
-				$arInsertUpdate['SYMBOL_NAME'] = iconv('windows-1251','utf-8',$arForecast['symbol']['@attributes']['name']);
+				//$arInsertUpdate['SYMBOL_NAME'] = iconv('windows-1251','utf-8',$arForecast['symbol']['@attributes']['name']);
 				$arInsertUpdate['SYMBOL_NAME'] = $arForecast['symbol']['@attributes']['name'];
 				$arInsertUpdate['SYMBOL_VAR'] = $arForecast['symbol']['@attributes']['var'];
 			}
@@ -308,25 +470,44 @@ class Weather
 				$arInsertUpdate['CLOUDS_ALL'] = $arForecast['clouds']['@attributes']['all'];
 			}
 
-			$forecastRes = ForecastTable::getList(array(
+			$forecastRes = Tables\ForecastTable::getList(array(
 				'select' => array('ID'),
 				'filter' => array(
-					'CITY_ID' => $city['ID'],
+					'CITY_ID' => $arCity['ID'],
 					'DATETIME_FROM' => $dateFrom,
 					'DATETIME_TO' => $dateTo
 				)
 			));
+			if ($forecastRes && isset($forecastRes[0]))
+			{
+				$forecastRes = $forecastRes[0];
+			}
 			if ($forecastRes)
 			{
 				//Update
 				$query = new Query('update');
 				$query->setUpdateParams(
 					$arInsertUpdate,
-					$forecastRes[0]['ID'],
-					ForecastTable::getTableName(),
-					ForecastTable::getMapArray()
+					$forecastRes['ID'],
+					Tables\ForecastTable::getTableName(),
+					Tables\ForecastTable::getMapArray()
 				);
 				$query->exec();
+
+				$arInsertUpdate['DATETIME_FROM'] = $dateFrom;
+				$arInsertUpdate['DATETIME_TO'] = $dateTo;
+
+/*				if ($arEvents = Events::getPackageEvents('owm','OnAfterUpdateForecast'))
+				{
+					foreach ($arEvents as $sort=>$ar_events)
+					{
+						foreach ($ar_events as $arEvent)
+						{
+							Events::executePackageEvent($arEvent,array($arInsertUpdate));
+						}
+					}
+				}*/
+				Events::runEvents('owm','OnAfterUpdateForecast',array($arInsertUpdate));
 			}
 			else
 			{
@@ -337,10 +518,22 @@ class Weather
 				$query = new Query('insert');
 				$query->setInsertParams(
 					$arInsertUpdate,
-					ForecastTable::getTableName(),
-					ForecastTable::getMapArray()
+					Tables\ForecastTable::getTableName(),
+					Tables\ForecastTable::getMapArray()
 				);
 				$query->exec();
+
+/*				if ($arEvents = Events::getPackageEvents('owm','OnAfterInsertForecast'))
+				{
+					foreach ($arEvents as $sort=>$ar_events)
+					{
+						foreach ($ar_events as $arEvent)
+						{
+							Events::executePackageEvent($arEvent,array($arInsertUpdate));
+						}
+					}
+				}*/
+				Events::runEvents('owm','OnAfterInsertForecast',array($arInsertUpdate));
 			}
 		}
 	}
@@ -379,12 +572,17 @@ class Weather
 		$sunDayHour = floor($sunDayMin/60);
 		$sunDayMin -= $sunDayHour*60;
 
-		$arSunRise = SunTable::getList(array(
+		$arSunRise = Tables\SunTable::getList(array(
 			'filter' => array(
 				'CITY_ID' => $city['ID'],
 				'DATE' => $sunRiseDate
-			)
+			),
+			'limit' => 1
 		));
+		if ($arSunRise && isset($arSunRise[0]))
+		{
+			$arSunRise = $arSunRise[0];
+		}
 		$arInsertUpdate = array(
 			'CITY_ID' => $city['ID'],
 			'DATE' => $sunRiseDate,
@@ -399,9 +597,9 @@ class Weather
 			$query = new Query('update');
 			$query->setUpdateParams(
 				$arInsertUpdate,
-				$arSunRise[0]['ID'],
-				SunTable::getTableName(),
-				SunTable::getMapArray()
+				$arSunRise['ID'],
+				Tables\SunTable::getTableName(),
+				Tables\SunTable::getMapArray()
 			);
 			$res = $query->exec();
 			if ($res->getResult())
@@ -419,8 +617,8 @@ class Weather
 			$query = new Query('insert');
 			$query->setInsertParams(
 				$arInsertUpdate,
-				SunTable::getTableName(),
-				SunTable::getMapArray()
+				Tables\SunTable::getTableName(),
+				Tables\SunTable::getMapArray()
 			);
 			$res = $query->exec();
 			if ($res->getResult())
@@ -434,7 +632,7 @@ class Weather
 		}
 	}
 
-	protected static function getWeatherArray ($cityID=null)
+	protected static function getWeatherArray ($cityID=null, $appID=false)
 	{
 		try
 		{
@@ -459,9 +657,9 @@ class Weather
 			return false;
 		}
 
-		if ($appID = Options::getOptionStr('OWM_APP_ID'))
+		if ($appID)
 		{
-			if ($weatherXML = simplexml_load_file("http://api.openweathermap.org/data/2.5/forecast?id=".$cityID."&appid=".$appID."&mode=xml&units=metric&lang=ru"))
+			if ($weatherXML = @simplexml_load_file("http://api.openweathermap.org/data/2.5/forecast?id=".$cityID."&appid=".$appID."&mode=xml&units=metric&lang=ru"))
 			{
 				$json = json_encode($weatherXML);
 				$arWeather = json_decode($json,TRUE);
